@@ -1,0 +1,17 @@
+# Frontend – staticki HTML serviramo putem nginxa
+FROM nginx:1.27-alpine
+
+# Non-root: koristimo nginxovog postojeceg korisnika (uid 101)
+RUN chown -R nginx:nginx /var/cache/nginx /var/run /var/log/nginx
+
+COPY --chown=nginx:nginx . /usr/share/nginx/html
+
+# Nginx konfig bez root privilegija
+COPY --chown=nginx:nginx nginx.conf /etc/nginx/nginx.conf
+
+USER nginx
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD wget -qO- http://localhost:3000 || exit 1

@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-service-account
+  namespace: ticketing
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: worker-service-account
+  namespace: ticketing
+automountServiceAccountToken: false
+---
+# Role za CI/CD deploy pipeline (minimalne privilegije)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deploy-role
+  namespace: ticketing
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "patch", "update"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deploy-rolebinding
+  namespace: ticketing
+subjects:
+- kind: ServiceAccount
+  name: api-service-account
+  namespace: ticketing
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: deploy-role

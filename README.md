@@ -1,48 +1,111 @@
-# Secure Event Ticketing Platform (Sample DevSecOps Project)
+# Secure Event Ticketing Platform – DevOps projekt
 
-Ovaj repozitorij je referentni uzorak aplikacije za kolegij **Uvod u DevOps - DevSecOps**.
-Prikazuje cijeli tok: lokalni razvoj kroz Compose i produkcijski deployment kroz Kubernetes manifeste.
+**Studentica:** Gabriela Gavrić  
+**Kolegij:** Uvod u DevOps – DevSecOps  
+**Akademska godina:** 2025./2026.
 
 ## Arhitektura
 
-- `frontend` - web UI za pregled evenata i kupnju karata
-- `api` - REST API za evente, narudzbe i health provjere
-- `worker` - pozadinska obrada queue poruka
-- `postgres` - trajna pohrana narudzbi
-- `redis` - queue/cache sloj
+| Servis | Tehnologija | Port |
+|--------|-------------|------|
+| frontend | nginx:alpine (staticki HTML) | 3000 |
+| api | Node.js + Express | 8080 |
+| worker | Node.js (queue consumer) | – |
+| postgres | PostgreSQL 16 | 5432 |
+| redis | Redis 7 | 6379 |
 
-### Brza validacija funkcionalnosti
+## 1. dio – Lokalni razvoj (Docker/Podman Compose)
 
-1. Health API:
-   ```bash
-   curl http://localhost:8080/healthz
-   curl http://localhost:8080/readyz
-   ```
-2. Dohvati evente:
-   ```bash
-   curl http://localhost:8080/events
-   ```
-3. Posalji narudzbu:
-   ```bash
-   curl -X POST http://localhost:8080/tickets/purchase \
-     -H "Content-Type: application/json" \
-     -d '{"eventId":"evt-1001","customerEmail":"student@example.com","quantity":2}'
-   ```
-4. Provjeri obradene narudzbe:
-   ```bash
-   curl http://localhost:8080/tickets/orders
-   ```
-5. UI:
-   - Otvori `http://localhost:3000`
+### Preduvjeti
+- Docker ili Podman + podman-compose
+
+### Pokretanje
+
+```bash
+cp .env.example .env
+# Uredi .env i postavi POSTGRES_PASSWORD
+
+podman compose up --build -d
+
+# Provjera statusa
+podman compose ps
+
+# Validacija
+curl http://localhost:8080/healthz
+curl http://localhost:8080/readyz
+curl http://localhost:8080/events
+
+# Otvori browser: http://localhost:3000
+```
+
+### Zaustavljanje
+
+```bash
+podman compose down          # cuva podatke
+podman compose down -v       # brise volumen (cistи restart)
+```
+
+## 2. dio – Produkcija (Kubernetes)
+
+```bash
+# Kreiranje namespacea
+kubectl apply -f k8s/namespace.yaml
+
+# ConfigMap i Secret
+kubectl apply -f k8s/configmap.yaml
+kubectl create secret generic db-secret \
+  --from-literal=POSTGRES_PASSWORD=<lozinka> \
+  -n ticketing
+
+# RBAC
+kubectl apply -f k8s/rbac.yaml
+
+# Deployment svih servisa
+kubectl apply -f k8s/postgres-deployment.yaml
+kubectl apply -f k8s/redis-deployment.yaml
+kubectl apply -f k8s/api-deployment.yaml
+kubectl apply -f k8s/worker-deployment.yaml
+kubectl apply -f k8s/frontend-deployment.yaml
+
+# Mreza i pristup
+kubectl apply -f k8s/network-policy.yaml
+kubectl apply -f k8s/ingress.yaml
+
+# Provjera
+kubectl get all -n ticketing
+```
+
+### Rolling update i rollback
+
+```bash
+# Update na novu verziju
+kubectl set image deployment/api api=ghcr.io/<user>/event-ticketing/api:<sha> -n ticketing
+kubectl rollout status deployment/api -n ticketing
+
+# Rollback
+kubectl rollout undo deployment/api -n ticketing
+```
 
 ## Sigurnosni elementi
 
-- Multi-stage Docker build i non-root runtime korisnik
-- Secret + ConfigMap odvojena konfiguracija
-- Liveness/Readiness probe
-- Resource requests/limits
-- ServiceAccount + RBAC
-- NetworkPolicy segmentacija
-- Trivy skeniranje slika u CI pipelineu
+- Multi-stage Containerfile build (minimalna runtime slika)
+- Non-root korisnik u svim kontejnerima (UID 1001)
+- Trivy skeniranje slika u CI/CD pipelineu
+- CodeQL staticka analiza koda
+- Kubernetes Secrets za osjetljive podatke
+- NetworkPolicy segmentacija prometa
+- RBAC sa minimalnim privilegijama
+- Liveness i readiness health probe
 
-Detalji skeniranja: `docs/security/image-scan-report.md`
+## Trivy skeniranje (lokalno)
+
+```bash
+# Instalacija
+sudo apt-get install -y wget apt-transport-https gnupg
+wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+echo "deb https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee /etc/apt/sources.list.d/trivy.list
+sudo apt-get update && sudo apt-get install -y trivy
+
+# Skeniranje izgradene slike
+trivy image --severity HIGH,CRITICAL event-ticketing_api:latest
+```

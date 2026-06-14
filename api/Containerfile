@@ -1,0 +1,27 @@
+# ── Stage 1: Instalacija ovisnosti ─────────────────────────────────────────
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --omit=dev --ignore-scripts \
+    && npm cache clean --force
+
+# ── Stage 2: Produkcijska slika ─────────────────────────────────────────────
+FROM node:20-alpine AS runtime
+
+# Non-root korisnik
+RUN addgroup --system --gid 1001 appgroup \
+    && adduser  --system --uid 1001 --ingroup appgroup appuser
+
+WORKDIR /app
+
+COPY --from=deps --chown=appuser:appgroup /app/node_modules ./node_modules
+COPY --chown=appuser:appgroup . .
+
+USER appuser
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8080/healthz || exit 1
+
+CMD ["node", "src/server.js"]

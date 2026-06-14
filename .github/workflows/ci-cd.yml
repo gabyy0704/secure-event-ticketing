@@ -1,0 +1,100 @@
+name: CI/CD – Secure Event Ticketing
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY:     ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/event-ticketing
+
+jobs:
+
+  # ── Job 1: Test i staticka analiza ──────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+
+      - name: Instaliraj i testiraj API
+        working-directory: ./api
+        run: npm ci && npm test --if-present
+
+      - name: Instaliraj i testiraj Worker
+        working-directory: ./worker
+        run: npm ci && npm test --if-present
+
+      - name: CodeQL inicijalizacija
+        uses: github/codeql-action/init@v3
+        with: { languages: javascript }
+
+      - name: CodeQL analiza
+        uses: github/codeql-action/analyze@v3
+
+  # ── Job 2: Build i Trivy skeniranje (quality gate) ──────────────────────
+  build-and-scan:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api, worker, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build kontejnerska slika
+        run: |
+          docker build \
+            -t ${{ matrix.service }}:${{ github.sha }} \
+            -f ${{ matrix.service }}/Containerfile \
+            ./${{ matrix.service }}
+
+      - name: Trivy skeniranje – quality gate
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ matrix.service }}:${{ github.sha }}
+          format:    sarif
+          output:    trivy-${{ matrix.service }}.sarif
+          severity:  HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Upload SARIF u GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.service }}.sarif
+
+  # ── Job 3: Objava slika u GHCR ──────────────────────────────────────────
+  publish:
+    needs: build-and-scan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    strategy:
+      matrix:
+        service: [api, worker, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login u GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build i push s verzioniranim tagovima
+        uses: docker/build-push-action@v5
+        with:
+          context:    ./${{ matrix.service }}
+          file:       ./${{ matrix.service }}/Containerfile
+          push:       true
+          tags: |
+            ghcr.io/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+            ghcr.io/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:latest

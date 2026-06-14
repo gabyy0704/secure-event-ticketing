@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: ticketing
+data:
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB:   ticketing
+  POSTGRES_USER: ticketing_user
+  REDIS_HOST:    redis
+  REDIS_PORT:    "6379"
+  QUEUE_NAME:    ticket_orders
+  NODE_ENV:      production
+  API_PORT:      "8080"
