@@ -9,7 +9,9 @@ on:
 env:
   REGISTRY:     ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/event-ticketing
-
+permissions:
+  security-events: write
+  contents: read
 jobs:
 
   # ── Job 1: Test i staticka analiza ──────────────────────────────────────
