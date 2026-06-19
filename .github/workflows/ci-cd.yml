@@ -1,11 +1,9 @@
-name: CI/CD – Secure Event Ticketing
-
+name: CI/CD - Secure Event Ticketing
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
 env:
   REGISTRY:     ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/event-ticketing
@@ -13,32 +11,24 @@ permissions:
   security-events: write
   contents: read
 jobs:
-
-  # ── Job 1: Test i staticka analiza ──────────────────────────────────────
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
-
       - name: Instaliraj i testiraj API
         working-directory: ./api
         run: npm install && npm test --if-present
-
       - name: Instaliraj i testiraj Worker
         working-directory: ./worker
         run: npm install && npm test --if-present
-
       - name: CodeQL inicijalizacija
         uses: github/codeql-action/init@v3
         with: { languages: javascript }
-
       - name: CodeQL analiza
         uses: github/codeql-action/analyze@v3
 
-  # ── Job 2: Build i Trivy skeniranje (quality gate) ──────────────────────
   build-and-scan:
     needs: test
     runs-on: ubuntu-latest
@@ -47,30 +37,43 @@ jobs:
         service: [api, worker, frontend]
     steps:
       - uses: actions/checkout@v4
-
       - name: Build kontejnerska slika
         run: |
           docker build \
             -t ${{ matrix.service }}:${{ github.sha }} \
             -f ${{ matrix.service }}/Containerfile \
             ./${{ matrix.service }}
-
-      - name: Trivy skeniranje – quality gate
+      - name: Trivy quality gate (blokira samo rjesive HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ matrix.service }}:${{ github.sha }}
-          format:    sarif
-          output:    trivy-${{ matrix.service }}.sarif
-          severity:  HIGH,CRITICAL
-          exit-code: "1"
-
+          image-ref:      ${{ matrix.service }}:${{ github.sha }}
+          format:         table
+          output:         trivy-report-${{ matrix.service }}.txt
+          severity:       HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code:      "1"
+      - name: Trivy SARIF izvjestaj (GitHub Security)
+        uses: aquasecurity/trivy-action@master
+        if: always()
+        with:
+          image-ref:      ${{ matrix.service }}:${{ github.sha }}
+          format:         sarif
+          output:         trivy-${{ matrix.service }}.sarif
+          severity:       HIGH,CRITICAL
+          ignore-unfixed: true
       - name: Upload SARIF u GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: trivy-${{ matrix.service }}.sarif
+      - name: Upload Trivy izvjestaja (artefakt)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report-${{ matrix.service }}
+          path: trivy-report-${{ matrix.service }}.txt
+          retention-days: 30
 
-  # ── Job 3: Objava slika u GHCR ──────────────────────────────────────────
   publish:
     needs: build-and-scan
     if: github.ref == 'refs/heads/main'
@@ -83,14 +86,12 @@ jobs:
         service: [api, worker, frontend]
     steps:
       - uses: actions/checkout@v4
-
       - name: Login u GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build i push s verzioniranim tagovima
         uses: docker/build-push-action@v5
         with:
