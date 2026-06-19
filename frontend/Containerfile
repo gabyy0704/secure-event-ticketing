@@ -1,17 +1,25 @@
-# Frontend – staticki HTML serviramo putem nginxa
-FROM nginx:1.27-alpine
+# Frontend - Node server (poslužuje statiku + /config endpoint)
+# Stage 1: instalacija ovisnosti
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package.json ./
+RUN npm install --omit=dev
 
-# Non-root: koristimo nginxovog postojeceg korisnika (uid 101)
-RUN chown -R nginx:nginx /var/cache/nginx /var/run /var/log/nginx
+# Stage 2: minimalna runtime slika
+FROM node:20-alpine AS runtime
+WORKDIR /app
 
-COPY --chown=nginx:nginx . /usr/share/nginx/html
+# Non-root korisnik
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-# Nginx konfig bez root privilegija
-COPY --chown=nginx:nginx nginx.conf /etc/nginx/nginx.conf
+COPY --from=builder /app/node_modules ./node_modules
+COPY src/ ./src
+COPY package.json ./
 
-USER nginx
-
+USER appuser
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD wget -qO- http://localhost:3000 || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:3000/healthz || exit 1
+
+CMD ["node", "src/server.js"]
